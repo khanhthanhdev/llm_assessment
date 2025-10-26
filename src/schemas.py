@@ -30,7 +30,7 @@ class Review(BaseModel):
     review_id: str = Field(..., description="Unique identifier for the review")
     invitation: Optional[str] = Field(None, description="OpenReview invitation string")
     rating: Optional[Union[str, float]] = Field(None, description="Review rating (e.g., '8: Accept', '6', 7.5)")
-    confidence: Optional[str] = Field(None, description="Reviewer confidence level")
+    confidence: Optional[Union[str, int]] = Field(None, description="Reviewer confidence level")
     summary: Optional[str] = Field(None, description="Brief summary of the review")
     soundness: Optional[str] = Field(None, description="Soundness evaluation")
     presentation: Optional[str] = Field(None, description="Presentation quality assessment")

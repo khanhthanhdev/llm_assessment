@@ -1,367 +1,751 @@
-# OpenReview Crawler - Project Structure & Pipeline
+# OpenReview Paper Crawler with MarkItDown
 
-## 📁 Recommended Project Structure
+## Project Overview
+A system to crawl papers from OpenReview, download PDFs using the `pdf_url` from JSON metadata, and convert them to markdown using MarkItDown library.
+
+---
+
+## Folder Structure
 
 ```
-openreview-crawler/
-│
-├── config/
-│   ├── __init__.py
-│   ├── settings.py              # Configuration settings
-│   └── venues.yaml              # Conference venues configuration
+open_review/
+├── data/
+│   ├── papers/
+│   │   └── {paper_id}/
+│   │       ├── paper.pdf                    # Original PDF from OpenReview
+│   │       ├── paper.md                     # Markdown (converted via MarkItDown)
+│   │       └── paper_full.json             # Complete paper data
+│   │
+│   ├── index/
+│   │   ├── papers_index.json               # Index of all papers with status
+│   │   └── processing_log.json             # Processing history and errors
+│   │
+│   └── input/
+│       └── iclr_2024_papers_reviews_accepted.json  # Input JSON from OpenReview
 │
 ├── src/
 │   ├── __init__.py
-│   │
-│   ├── crawler/
-│   │   ├── __init__.py
-│   │   ├── base_crawler.py      # Base crawler class
-│   │   ├── iclr_crawler.py      # ICLR-specific crawler
-│   │   ├── neurips_crawler.py   # NeurIPS crawler
-│   │   └── icml_crawler.py      # ICML crawler
-│   │
-│   ├── parsers/
-│   │   ├── __init__.py
-│   │   ├── paper_parser.py      # Parse paper metadata
-│   │   ├── review_parser.py     # Parse review content
-│   │   └── comment_parser.py    # Parse comments/rebuttals
-│   │
-│   ├── storage/
-│   │   ├── __init__.py
-│   │   ├── file_storage.py      # Save to JSON/CSV
-│   │   ├── db_storage.py        # Save to database
-│   │   └── cloud_storage.py     # Upload to S3/GCS (optional)
-│   │
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── rate_limiter.py      # API rate limiting
-│   │   ├── logger.py            # Logging configuration
-│   │   ├── validators.py        # Data validation
-│   │   └── helpers.py           # Helper functions
-│   │
-│   └── analysis/
-│       ├── __init__.py
-│       ├── statistics.py        # Generate statistics
-│       ├── visualizations.py    # Create visualizations
-│       └── export.py            # Export in different formats
-│
-├── data/
-│   ├── raw/                     # Raw crawled data
-│   │   ├── iclr_2024/
-│   │   └── iclr_2023/
-│   ├── processed/               # Cleaned/processed data
-│   └── cache/                   # API response cache
-│
-├── outputs/
-│   ├── reports/                 # Generated reports
-│   ├── visualizations/          # Charts and graphs
-│   └── exports/                 # Exported data
-│
-├── tests/
-│   ├── __init__.py
-│   ├── test_crawler.py
-│   ├── test_parsers.py
-│   └── test_storage.py
+│   ├── pdf_downloader.py                    # Download PDFs from pdf_url
+│   ├── markdown_converter.py                # MarkItDown wrapper
+│   ├── storage_manager.py                   # File/JSON storage handler
+│   └── processor.py                         # Main processing pipeline
 │
 ├── scripts/
-│   ├── crawl_conference.py      # Main crawling script
-│   ├── batch_crawl.py           # Batch crawl multiple years/venues
-│   ├── update_data.py           # Update existing data
-│   └── generate_report.py       # Generate analysis reports
+│   ├── process_papers.py                    # Main script to process all papers
+│   ├── retry_failed.py                      # Retry failed conversions
+│   ├── rebuild_index.py                     # Rebuild index
+│   └── stats.py                             # Show processing statistics
 │
-├── notebooks/
-│   ├── exploratory_analysis.ipynb
-│   └── data_visualization.ipynb
+├── config.yaml                              # Configuration file (in root)
 │
-├── logs/                        # Application logs
+├── logs/
+│   └── processing_{timestamp}.log
 │
-├── .env                         # Environment variables
-├── .gitignore
-├── requirements.txt
-├── setup.py
+├── tests/
+│   ├── test_downloader.py
+│   ├── test_converter.py
+│   └── test_storage.py
+│
+├── pyproject.toml                          # Dependencies (using uv)
+├── uv.lock
 ├── README.md
-└── Makefile                     # Common commands
+├── .env
+├── get_url.py                              # Existing URL utility
+├── main.py                                 # Existing main script
+└── iclr_2024_papers_reviews_accepted.json   # Existing input data
 ```
 
-## 🔄 Data Pipeline Architecture
+---
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    DATA COLLECTION LAYER                     │
-├─────────────────────────────────────────────────────────────┤
-│  1. Configuration                                            │
-│     ├─ Load venue configs (ICLR, NeurIPS, etc.)            │
-│     ├─ Set API credentials (if needed)                      │
-│     └─ Define crawling parameters                           │
-│                                                              │
-│  2. API Client Management                                    │
-│     ├─ Initialize OpenReview client                         │
-│     ├─ Handle API version detection                         │
-│     └─ Implement rate limiting                              │
-│                                                              │
-│  3. Data Fetching                                           │
-│     ├─ Get paper submissions                                │
-│     ├─ Fetch reviews for each paper                         │
-│     ├─ Collect comments & rebuttals                         │
-│     └─ Get meta-reviews & decisions                         │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                    DATA PROCESSING LAYER                     │
-├─────────────────────────────────────────────────────────────┤
-│  4. Data Parsing & Cleaning                                 │
-│     ├─ Extract structured fields                            │
-│     ├─ Handle different API formats (v1/v2)                │
-│     ├─ Clean text content                                   │
-│     └─ Validate data completeness                           │
-│                                                              │
-│  5. Data Enrichment                                         │
-│     ├─ Calculate derived metrics (avg rating, etc.)        │
-│     ├─ Extract keywords & topics                            │
-│     ├─ Sentiment analysis on reviews (optional)            │
-│     └─ Link related papers                                  │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                     DATA STORAGE LAYER                       │
-├─────────────────────────────────────────────────────────────┤
-│  6. Primary Storage                                          │
-│     ├─ Raw JSON (complete data)                            │
-│     ├─ CSV summaries (quick access)                        │
-│     └─ Database (optional: PostgreSQL/MongoDB)             │
-│                                                              │
-│  7. Cache Management                                        │
-│     ├─ Cache API responses                                  │
-│     ├─ Prevent duplicate requests                           │
-│     └─ Enable incremental updates                           │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                    DATA ANALYSIS LAYER                       │
-├─────────────────────────────────────────────────────────────┤
-│  8. Analysis & Insights                                      │
-│     ├─ Generate statistics                                  │
-│     ├─ Trend analysis over years                           │
-│     ├─ Review quality metrics                               │
-│     └─ Acceptance rate analysis                             │
-│                                                              │
-│  9. Visualization                                           │
-│     ├─ Rating distributions                                 │
-│     ├─ Topic trends                                         │
-│     ├─ Review length analysis                               │
-│     └─ Author/institution statistics                        │
-│                                                              │
-│  10. Export & Reporting                                     │
-│      ├─ Generate PDF reports                                │
-│      ├─ Export to various formats                           │
-│      └─ Create dashboards (optional)                        │
-└─────────────────────────────────────────────────────────────┘
+## Data Schema
+
+### 1. Input: `iclr_2024_papers_reviews_accepted.json`
+
+Your existing JSON with OpenReview data:
+
+```json
+[
+  {
+    "paper_id": "abc123xyz",
+    "forum_id": "forum_xyz",
+    "number": 42,
+    "title": "Novel Approach to Machine Learning",
+    "abstract": "We present...",
+    "authors": ["Alice Smith", "Bob Jones"],
+    "keywords": ["machine learning", "optimization"],
+    "pdf_url": "https://openreview.net/pdf?id=abc123xyz",
+    "forum_url": "https://openreview.net/forum?id=abc123xyz",
+    "reviews": [...],
+    "comments": [...],
+    "meta_reviews": [...],
+    "decision": "Accept (Poster)"
+  }
+]
 ```
 
-## 🧭 Pipeline Walkthrough
+### 2. Output: `paper_full.json` (per paper)
 
-### Pipeline A — Data Collection
-- **Configuration bootstrap**: `config/settings.py` loads `.env`, venue YAML, and CLI flags, then instantiates a `CrawlerConfig` dataclass with rate limits and attachment preferences.
-- **Client factory**: `src/crawler/base_crawler.py` exposes `OpenReviewClientFactory`. It tries API v2 (`openreview.api.OpenReviewClient`) and falls back to v1. A shared `RateLimiter` (see `src/utils/rate_limiter.py`) throttles requests.
-- **Submission discovery**: Venue-specific crawlers (for example `ICLRCrawler`) resolve invitations (`Submission`, `Blind_Submission`, `ARR` mirrors). The crawler yields `SubmissionRecord` objects and stores raw JSON to `data/raw/{venue}/{year}/submissions/{forum_id}.json`.
-- **Artifact fetching**: For each forum ID, the crawler downloads attachments (`client.get_attachments` or direct `pdf_url`) to `data/raw/{venue}/{year}/papers/{forum_id}.pdf`. Retry logic and checksum validation live in `src/utils/helpers.py`.
-- **Note aggregation**: `fetch_forum_notes` collects reviews, meta-reviews, comments, decisions, and authorship records. Each note is normalized into `ReviewRecord`, `DecisionRecord`, or `CommentRecord` dataclasses before entering the parsing stage.
+Enhanced with processing metadata:
 
-### Pipeline B — Parsing & Normalization
-- **Schema-aware parsers**: `src/parsers/paper_parser.py` and `review_parser.py` map raw OpenReview payloads to consistent internal schemas, handling v1/v2 differences (nested `value` fields, anonymized IDs, rating formats).
-- **Validation**: `src/utils/validators.py` ensures required fields (title, abstract, decision) are present. Invalid entries are logged to `logs/validation.log` and moved to `data/cache/rejects/`.
-- **Cleaning & NLP hooks**: Optional processors (keyword extraction, language cleaning, sentiment scoring) live in `src/parsers/enrichments/`. Results are appended to each record as enrichment metadata.
-- **Serialization**: Parsed records are written to `data/processed/{venue}/{year}/papers.jsonl` and `reviews.jsonl`. Each line is one normalized JSON object for easy downstream consumption.
-
-### Pipeline C — Storage & Distribution
-- **Primary sinks**: `src/storage/file_storage.py` persists JSONL plus summary CSVs (`papers_summary.csv`, `reviews_long.csv`). `db_storage.py` optionally streams records into Postgres/Mongo collections with upserts on `forum_id`.
-- **Cache & incremental updates**: `src/storage/cache.py` (to create) writes hash manifests (`.manifest`) so future runs skip unchanged submissions unless `--force` is used.
-- **Export automation**: `src/analysis/export.py` produces derived tables (acceptance rates, rating histograms) and stores them under `outputs/exports/`. Exports are versioned by run timestamp.
-
-### Pipeline D — Analysis & Reporting
-- **Statistics**: `src/analysis/statistics.py` computes metrics (average rating, decision distribution, review length). Outputs feed dashboards or notebooks.
-- **Visualizations**: `visualizations.py` leverages matplotlib/Altair to save figures into `outputs/visualizations/`.
-- **Narrative reports**: `scripts/generate_report.py` assembles summaries (markdown/PDF) combining stats, key charts, and notable comments. A Pandoc/WeasyPrint step can convert to PDF if needed.
-
-## 🗂️ Storage Layout & Naming Conventions
-- Raw payloads mirror the exact OpenReview responses for auditability.
-- Processed datasets use newline-delimited JSON for stream processing.
-- Large binaries (PDFs) stay separated in `papers/` with SHA256 filenames to prevent collisions.
-- Each pipeline run writes a metadata file (`run.json`) describing configuration, timestamps, and Git commit for reproducibility.
-
-```
-data/
-└── raw/iclr_2025/
-    ├── submissions/
-    │   └── {forum_id}.json
-    ├── notes/
-    │   └── {forum_id}/
-    │       ├── reviews/{note_id}.json
-    │       ├── comments/{note_id}.json
-    │       └── decisions/{note_id}.json
-    └── papers/{forum_id}.pdf
-└── processed/iclr_2025/
-    ├── papers.jsonl
-    ├── reviews.jsonl
-    ├── comments.jsonl
-    └── summary.csv
-```
-
-## ⚙️ Orchestration Suggestions
-- Provide CLI entry points (Typer/Click) in `scripts/` to run a full crawl: `python -m scripts.crawl_conference --venue iclr --year 2025 --accepted-only`.
-- Enable pipeline scheduling with a simple `Makefile` target or GitHub Action that triggers nightly crawls and pushes processed artifacts.
-- Integrate `.env` with `config/settings.py`; document required keys (`OPENREVIEW_USERNAME`, `OPENREVIEW_PASSWORD`, `OPENREVIEW_RATE_LIMIT`).
-
-## ✅ Next Steps
-- Flesh out the empty `src/` modules according to the stubs above.
-- Add unit tests in `tests/` to cover crawler fallbacks, parser normalization, and storage adapters.
-- Document edge cases (e.g., withdrawn submissions, missing PDFs) in `docs/troubleshooting.md`.
-## 🚀 Implementation Pipeline
-
-### Phase 1: Core Infrastructure (Week 1-2)
-1. Set up project structure
-2. Implement base crawler class
-3. Create configuration system
-4. Add logging and error handling
-5. Implement rate limiter
-
-### Phase 2: Data Collection (Week 2-3)
-1. Implement venue-specific crawlers
-2. Add parser modules
-3. Create caching mechanism
-4. Build retry logic for failures
-5. Add progress tracking
-
-### Phase 3: Storage & Processing (Week 3-4)
-1. Implement file storage
-2. Add database support (optional)
-3. Create data validation
-4. Build incremental update system
-5. Add data cleaning utilities
-
-### Phase 4: Analysis & Visualization (Week 4-5)
-1. Build statistics module
-2. Create visualization tools
-3. Implement export functions
-4. Generate automated reports
-5. Add data quality checks
-
-### Phase 5: Testing & Documentation (Week 5-6)
-1. Write unit tests
-2. Integration testing
-3. Create documentation
-4. Add usage examples
-5. Performance optimization
-
-## 🔧 Key Features to Implement
-
-### 1. **Rate Limiting**
-- Respect API limits
-- Exponential backoff on errors
-- Configurable request delays
-
-### 2. **Caching**
-- Cache API responses
-- Avoid re-fetching unchanged data
-- Support incremental updates
-
-### 3. **Error Handling**
-- Retry failed requests
-- Log all errors
-- Resume from interruption
-
-### 4. **Progress Tracking**
-- Show progress bars
-- Log checkpoint saves
-- Estimate completion time
-
-### 5. **Data Validation**
-- Verify data completeness
-- Check for missing fields
-- Flag anomalies
-
-### 6. **Flexible Configuration**
-- YAML/JSON config files
-- Environment variables
-- Command-line arguments
-
-### 7. **Monitoring & Logging**
-- Structured logging
-- Error notifications
-- Performance metrics
-
-## 📊 Data Models
-
-### Paper Model
-```python
+```json
 {
-    "id": str,
-    "title": str,
-    "abstract": str,
-    "authors": List[str],
-    "keywords": List[str],
-    "venue": str,
-    "year": int,
-    "url": str,
-    "reviews": List[Review],
-    "decision": str,
-    "metadata": dict
+  "paper_id": "abc123xyz",
+  "forum_id": "forum_xyz",
+  "number": 42,
+  "title": "Novel Approach to Machine Learning",
+  "abstract": "We present...",
+  "authors": ["Alice Smith", "Bob Jones"],
+  "keywords": ["machine learning", "optimization"],
+  "pdf_url": "https://openreview.net/pdf?id=abc123xyz",
+  "forum_url": "https://openreview.net/forum?id=abc123xyz",
+  
+  "reviews": [
+    {
+      "review_id": "review_001",
+      "rating": 8,
+      "confidence": 4,
+      "summary": "This paper proposes...",
+      "soundness": 4,
+      "presentation": 3,
+      "contribution": 4,
+      "strengths": "Novel approach...",
+      "weaknesses": "Limited experiments...",
+      "questions": "How does this compare...",
+      "limitations": "The authors acknowledge...",
+      "created": 1698765432000,
+      "modified": 1698765432000
+    }
+  ],
+  
+  "comments": [
+    {
+      "id": "comment_001",
+      "replyto": "review_001",
+      "content": "Thank you for the feedback...",
+      "created": 1698765432000
+    }
+  ],
+  
+  "meta_reviews": [...],
+  "decision": "Accept (Poster)",
+  
+  "processing": {
+    "status": "completed",
+    "pdf_downloaded": true,
+    "pdf_downloaded_at": "2025-10-25T10:25:00Z",
+    "pdf_size_bytes": 1048576,
+    "pdf_checksum": "sha256:abc123...",
+    "markdown_generated": true,
+    "markdown_generated_at": "2025-10-25T10:26:00Z",
+    "markdown_size_bytes": 85432,
+    "markitdown_version": "0.1.0",
+    "conversion_duration_seconds": 8.5,
+    "errors": []
+  },
+  
+  "files": {
+    "pdf": "papers/abc123xyz/paper.pdf",
+    "markdown": "papers/abc123xyz/paper.md",
+    "full_json": "papers/abc123xyz/paper_full.json"
+  }
 }
 ```
 
-### Review Model
-```python
+### 3. `papers_index.json` - Quick Lookup
+
+```json
 {
-    "id": str,
-    "paper_id": str,
-    "rating": float,
-    "confidence": str,
-    "summary": str,
-    "strengths": str,
-    "weaknesses": str,
-    "questions": str,
-    "timestamp": datetime
+  "total_papers": 1523,
+  "last_updated": "2025-10-25T12:00:00Z",
+  "papers": {
+    "abc123xyz": {
+      "title": "Novel Approach to Machine Learning",
+      "authors": ["Alice Smith", "Bob Jones"],
+      "pdf_url": "https://openreview.net/pdf?id=abc123xyz",
+      "status": "completed",
+      "has_pdf": true,
+      "has_markdown": true,
+      "decision": "Accept (Poster)"
+    }
+  },
+  "stats": {
+    "total": 1523,
+    "completed": 1450,
+    "pdf_downloaded": 1498,
+    "markdown_generated": 1450,
+    "failed_download": 25,
+    "failed_conversion": 48,
+    "pending": 0
+  }
 }
 ```
 
-## 🎯 Usage Examples
+### 4. `processing_log.json` - Processing History
 
-### Basic Crawling
-```bash
-python scripts/crawl_conference.py --venue iclr --year 2024
+```json
+{
+  "log_entries": [
+    {
+      "timestamp": "2025-10-25T10:25:00Z",
+      "paper_id": "abc123xyz",
+      "stage": "pdf_download",
+      "status": "success",
+      "duration_seconds": 3.2,
+      "file_size_bytes": 1048576
+    },
+    {
+      "timestamp": "2025-10-25T10:26:00Z",
+      "paper_id": "abc123xyz",
+      "stage": "markdown_conversion",
+      "status": "success",
+      "duration_seconds": 8.5
+    },
+    {
+      "timestamp": "2025-10-25T10:30:00Z",
+      "paper_id": "def456uvw",
+      "stage": "pdf_download",
+      "status": "failed",
+      "error": "HTTP 404: PDF not found",
+      "retry_count": 3
+    }
+  ]
+}
 ```
 
-### Batch Processing
-```bash
-python scripts/batch_crawl.py --venue iclr --years 2020-2024
+---
+
+## Implementation Files
+
+### 1. `pyproject.toml` (Dependencies)
+
+```toml
+[project]
+name = "open-review-crawler"
+version = "0.1.0"
+dependencies = [
+    "markitdown>=0.1.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "tqdm>=4.66.0",
+]
 ```
 
-### Generate Report
-```bash
-python scripts/generate_report.py --input data/raw/iclr_2024
+### 2. `config.yaml`
+
+```yaml
+download:
+  timeout: 60
+  max_retries: 3
+  retry_delay: 5
+  user_agent: "OpenReview-Crawler/1.0"
+  rate_limit: 5  # requests per second
+  
+storage:
+  base_dir: "data"
+  input_json: "iclr_2024_papers_reviews_accepted.json"
+  
+conversion:
+  markitdown_options: {}
+  skip_existing: true
+  
+processing:
+  batch_size: 10
+  parallel_workers: 4
+  resume_on_restart: true
+  
+logging:
+  level: "INFO"
+  file: "logs/processing.log"
+  console: true
 ```
 
-### Update Existing Data
-```bash
-python scripts/update_data.py --venue iclr --year 2024 --mode incremental
+---
+
+## Key Python Files
+
+### `src/storage_manager.py`
+
+```python
+from pathlib import Path
+import json
+import hashlib
+from typing import Dict, Optional
+
+class StorageManager:
+    def __init__(self, base_dir: str = "data"):
+        self.base_dir = Path(base_dir)
+        self.papers_dir = self.base_dir / "papers"
+        self.index_dir = self.base_dir / "index"
+        
+        # Create directories
+        self.papers_dir.mkdir(parents=True, exist_ok=True)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
+    
+    def get_paper_dir(self, paper_id: str) -> Path:
+        paper_dir = self.papers_dir / paper_id
+        paper_dir.mkdir(exist_ok=True)
+        return paper_dir
+    
+    def get_pdf_path(self, paper_id: str) -> Path:
+        return self.get_paper_dir(paper_id) / "paper.pdf"
+    
+    def get_markdown_path(self, paper_id: str) -> Path:
+        return self.get_paper_dir(paper_id) / "paper.md"
+    
+    def get_json_path(self, paper_id: str) -> Path:
+        return self.get_paper_dir(paper_id) / "paper_full.json"
+    
+    def save_pdf(self, paper_id: str, pdf_content: bytes) -> Dict:
+        pdf_path = self.get_pdf_path(paper_id)
+        pdf_path.write_bytes(pdf_content)
+        
+        # Calculate checksum
+        checksum = hashlib.sha256(pdf_content).hexdigest()
+        
+        return {
+            "path": str(pdf_path),
+            "size_bytes": len(pdf_content),
+            "checksum": f"sha256:{checksum}"
+        }
+    
+    def save_markdown(self, paper_id: str, markdown_content: str) -> Dict:
+        md_path = self.get_markdown_path(paper_id)
+        md_path.write_text(markdown_content, encoding='utf-8')
+        
+        return {
+            "path": str(md_path),
+            "size_bytes": len(markdown_content.encode('utf-8'))
+        }
+    
+    def save_paper_json(self, paper_id: str, data: Dict):
+        json_path = self.get_json_path(paper_id)
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    
+    def load_paper_json(self, paper_id: str) -> Optional[Dict]:
+        json_path = self.get_json_path(paper_id)
+        if json_path.exists():
+            with open(json_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return None
+    
+    def paper_exists(self, paper_id: str) -> Dict[str, bool]:
+        return {
+            "pdf": self.get_pdf_path(paper_id).exists(),
+            "markdown": self.get_markdown_path(paper_id).exists(),
+            "json": self.get_json_path(paper_id).exists()
+        }
 ```
 
-## 🛡️ Best Practices
+### `src/pdf_downloader.py`
 
-1. **Version Control**: Track all code changes, ignore data files
-2. **Configuration Management**: Use environment variables for sensitive data
-3. **Error Handling**: Always log errors with context
-4. **Testing**: Write tests for critical components
-5. **Documentation**: Keep README and docstrings updated
-6. **Performance**: Use async/parallel processing for large datasets
-7. **Data Privacy**: Respect author privacy, follow terms of service
-8. **Reproducibility**: Version your data exports
+```python
+import requests
+import time
+from typing import Optional, Dict
+import logging
 
-## 📈 Scalability Considerations
+logger = logging.getLogger(__name__)
 
-1. **Database**: Migrate to PostgreSQL/MongoDB for large datasets
-2. **Distributed Processing**: Use Celery for parallel crawling
-3. **Cloud Storage**: Use S3/GCS for data storage
-4. **API Management**: Implement request queuing
-5. **Monitoring**: Add alerting for failures
-6. **Caching**: Use Redis for distributed caching
+class PDFDownloader:
+    def __init__(self, timeout: int = 60, max_retries: int = 3, 
+                 retry_delay: int = 5, user_agent: str = None):
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.session = requests.Session()
+        
+        if user_agent:
+            self.session.headers['User-Agent'] = user_agent
+    
+    def download(self, pdf_url: str, paper_id: str) -> Optional[bytes]:
+        """Download PDF from URL with retries"""
+        
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.info(f"Downloading PDF for {paper_id} (attempt {attempt}/{self.max_retries})")
+                logger.debug(f"URL: {pdf_url}")
+                
+                response = self.session.get(pdf_url, timeout=self.timeout)
+                response.raise_for_status()
+                
+                # Verify it's a PDF
+                content_type = response.headers.get('Content-Type', '')
+                if 'pdf' not in content_type.lower():
+                    logger.warning(f"URL did not return PDF. Content-Type: {content_type}")
+                
+                logger.info(f"Successfully downloaded PDF for {paper_id} ({len(response.content)} bytes)")
+                return response.content
+                
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"HTTP error downloading {paper_id}: {e}")
+                if e.response.status_code == 404:
+                    logger.error(f"PDF not found (404) for {paper_id}")
+                    return None  # Don't retry 404s
+                    
+            except requests.exceptions.Timeout:
+                logger.error(f"Timeout downloading {paper_id}")
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Request error downloading {paper_id}: {e}")
+            
+            # Wait before retry
+            if attempt < self.max_retries:
+                logger.info(f"Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+        
+        logger.error(f"Failed to download PDF for {paper_id} after {self.max_retries} attempts")
+        return None
+```
+
+### `src/markdown_converter.py`
+
+```python
+from markitdown import MarkItDown
+from pathlib import Path
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+class MarkdownConverter:
+    def __init__(self):
+        self.converter = MarkItDown()
+    
+    def convert_pdf_to_markdown(self, pdf_path: Path, paper_id: str) -> Optional[str]:
+        """Convert PDF to markdown using MarkItDown"""
+        
+        try:
+            logger.info(f"Converting PDF to markdown for {paper_id}")
+            
+            # Convert using MarkItDown
+            result = self.converter.convert(str(pdf_path))
+            
+            if result and result.text_content:
+                markdown_content = result.text_content
+                logger.info(f"Successfully converted {paper_id} to markdown ({len(markdown_content)} chars)")
+                return markdown_content
+            else:
+                logger.error(f"MarkItDown returned empty content for {paper_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error converting {paper_id} to markdown: {e}")
+            return None
+    
+    def add_metadata_header(self, markdown: str, paper_data: Dict) -> str:
+        """Add paper metadata as YAML frontmatter"""
+        
+        header = "---\n"
+        header += f"paper_id: {paper_data.get('paper_id', 'unknown')}\n"
+        header += f"title: \"{paper_data.get('title', 'Unknown')}\"\n"
+        
+        authors = paper_data.get('authors', [])
+        if authors:
+            header += "authors:\n"
+            for author in authors:
+                header += f"  - {author}\n"
+        
+        keywords = paper_data.get('keywords', [])
+        if keywords:
+            header += "keywords:\n"
+            for keyword in keywords:
+                header += f"  - {keyword}\n"
+        
+        header += f"pdf_url: {paper_data.get('pdf_url', '')}\n"
+        header += f"forum_url: {paper_data.get('forum_url', '')}\n"
+        header += f"decision: {paper_data.get('decision', 'Unknown')}\n"
+        header += "---\n\n"
+        
+        return header + markdown
+```
+
+### `src/processor.py`
+
+```python
+import logging
+from datetime import datetime
+from typing import Dict, List
+from pathlib import Path
+import json
+
+from .storage_manager import StorageManager
+from .pdf_downloader import PDFDownloader
+from .markdown_converter import MarkdownConverter
+
+logger = logging.getLogger(__name__)
+
+class PaperProcessor:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.storage = StorageManager(config['storage']['base_dir'])
+        self.downloader = PDFDownloader(
+            timeout=config['download']['timeout'],
+            max_retries=config['download']['max_retries'],
+            retry_delay=config['download']['retry_delay'],
+            user_agent=config['download']['user_agent']
+        )
+        self.converter = MarkdownConverter()
+    
+    def process_paper(self, paper_data: Dict) -> Dict:
+        """Process a single paper: download PDF and convert to markdown"""
+        
+        paper_id = paper_data['paper_id']
+        result = {
+            "paper_id": paper_id,
+            "status": "pending",
+            "errors": []
+        }
+        
+        logger.info(f"Processing paper: {paper_id} - {paper_data.get('title', 'Unknown')}")
+        
+        # Check if already processed
+        if self.config['conversion']['skip_existing']:
+            exists = self.storage.paper_exists(paper_id)
+            if exists['pdf'] and exists['markdown']:
+                logger.info(f"Paper {paper_id} already processed, skipping")
+                result['status'] = 'skipped'
+                return result
+        
+        # Step 1: Download PDF
+        pdf_url = paper_data.get('pdf_url')
+        if not pdf_url:
+            error = "No pdf_url in paper data"
+            logger.error(f"{paper_id}: {error}")
+            result['errors'].append(error)
+            result['status'] = 'failed'
+            return result
+        
+        pdf_content = self.downloader.download(pdf_url, paper_id)
+        if not pdf_content:
+            error = "Failed to download PDF"
+            logger.error(f"{paper_id}: {error}")
+            result['errors'].append(error)
+            result['status'] = 'failed_download'
+            return result
+        
+        # Save PDF
+        pdf_info = self.storage.save_pdf(paper_id, pdf_content)
+        result['pdf_downloaded'] = True
+        result['pdf_size_bytes'] = pdf_info['size_bytes']
+        
+        # Step 2: Convert to Markdown
+        pdf_path = self.storage.get_pdf_path(paper_id)
+        markdown_content = self.converter.convert_pdf_to_markdown(pdf_path, paper_id)
+        
+        if not markdown_content:
+            error = "Failed to convert PDF to markdown"
+            logger.error(f"{paper_id}: {error}")
+            result['errors'].append(error)
+            result['status'] = 'failed_conversion'
+            return result
+        
+        # Add metadata header
+        markdown_with_header = self.converter.add_metadata_header(markdown_content, paper_data)
+        
+        # Save markdown
+        md_info = self.storage.save_markdown(paper_id, markdown_with_header)
+        result['markdown_generated'] = True
+        result['markdown_size_bytes'] = md_info['size_bytes']
+        
+        # Step 3: Save complete JSON with processing info
+        paper_data['processing'] = {
+            "status": "completed",
+            "pdf_downloaded": True,
+            "pdf_downloaded_at": datetime.utcnow().isoformat() + "Z",
+            "pdf_size_bytes": pdf_info['size_bytes'],
+            "pdf_checksum": pdf_info['checksum'],
+            "markdown_generated": True,
+            "markdown_generated_at": datetime.utcnow().isoformat() + "Z",
+            "markdown_size_bytes": md_info['size_bytes'],
+            "errors": result['errors']
+        }
+        
+        paper_data['files'] = {
+            "pdf": str(pdf_path),
+            "markdown": str(self.storage.get_markdown_path(paper_id)),
+            "full_json": str(self.storage.get_json_path(paper_id))
+        }
+        
+        self.storage.save_paper_json(paper_id, paper_data)
+        
+        result['status'] = 'completed'
+        logger.info(f"Successfully processed paper: {paper_id}")
+        
+        return result
+```
+
+---
+
+## Main Script: `scripts/process_papers.py`
+
+```python
+#!/usr/bin/env python3
+import json
+import yaml
+import logging
+from pathlib import Path
+import sys
+from tqdm import tqdm
+from datetime import datetime
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.processor import PaperProcessor
+
+def setup_logging(config):
+    log_level = getattr(logging, config['logging']['level'])
+    log_file = config['logging']['file']
+    
+    # Create logs directory
+    Path(log_file).parent.mkdir(exist_ok=True)
+    
+    # Configure logging
+    handlers = [logging.FileHandler(log_file)]
+    if config['logging']['console']:
+        handlers.append(logging.StreamHandler())
+    
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+
+def load_input_papers(input_path: str):
+    """Load papers from input JSON file"""
+    with open(input_path, 'r', encoding='utf-8') as f:
+        papers = json.load(f)
+    return papers
+
+def main():
+    # Load config
+    config_path = Path(__file__).parent.parent / "config.yaml"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    setup_logging(config)
+    logger = logging.getLogger(__name__)
+    
+    logger.info("="*60)
+    logger.info("Starting OpenReview Paper Processing")
+    logger.info("="*60)
+    
+    # Load input papers
+    input_json = config['storage']['input_json']
+    logger.info(f"Loading papers from: {input_json}")
+    papers = load_input_papers(input_json)
+    logger.info(f"Loaded {len(papers)} papers")
+    
+    # Initialize processor
+    processor = PaperProcessor(config)
+    
+    # Process papers
+    results = {
+        "completed": [],
+        "failed_download": [],
+        "failed_conversion": [],
+        "skipped": []
+    }
+    
+    for paper in tqdm(papers, desc="Processing papers"):
+        result = processor.process_paper(paper)
+        
+        status = result['status']
+        if status in results:
+            results[status].append(result['paper_id'])
+    
+    # Print summary
+    logger.info("="*60)
+    logger.info("Processing Summary:")
+    logger.info(f"  Total papers: {len(papers)}")
+    logger.info(f"  Completed: {len(results['completed'])}")
+    logger.info(f"  Skipped (already processed): {len(results['skipped'])}")
+    logger.info(f"  Failed (download): {len(results['failed_download'])}")
+    logger.info(f"  Failed (conversion): {len(results['failed_conversion'])}")
+    logger.info("="*60)
+    
+    # Save processing log
+    log_path = Path(config['storage']['base_dir']) / "index" / "processing_log.json"
+    with open(log_path, 'w') as f:
+        json.dump({
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "total_papers": len(papers),
+            "results": results
+        }, f, indent=2)
+    
+    logger.info(f"Processing log saved to: {log_path}")
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Usage
+
+### 1. Install Dependencies
+```bash
+uv sync
+```
+
+### 2. Prepare Input JSON
+Your OpenReview JSON is already at: `iclr_2024_papers_reviews_accepted.json`
+
+### 3. Run Processing
+```bash
+uv run python scripts/process_papers.py
+```
+
+### 4. Monitor Progress
+Check logs at: `logs/processing.log`
+
+### 5. Retry Failed Papers
+```bash
+uv run python scripts/retry_failed.py
+```
+
+### 6. Check Statistics
+```bash
+uv run python scripts/stats.py
+```
+
+---
+
+## Output Structure
+
+After processing, each paper will have:
+```
+data/papers/{paper_id}/
+├── paper.pdf          # Downloaded PDF
+├── paper.md           # Markdown with metadata header
+└── paper_full.json    # Complete data with processing info
+
+Index files:
+├── data/index/papers_index.json    # Index of all papers with status
+└── data/index/processing_log.json  # Processing history and errors
+```
+
+---
+
+## Implementation Status
+
+✅ **Complete Implementation**
+- Core modules created: `storage_manager.py`, `pdf_downloader.py`, `markdown_converter.py`, `processor.py`
+- Main processing script: `scripts/process_papers.py`
+- Utility scripts: `retry_failed.py`, `rebuild_index.py`, `stats.py`
+- Configuration: `config.yaml`
+- Dependencies: `pyproject.toml` with uv support
+
+## Next Steps
+
+1. **Test the implementation**: Run `python scripts/stats.py` to verify setup
+2. **Process papers**: Execute `python scripts/process_papers.py` to start crawling
+3. **Monitor progress**: Use `python scripts/stats.py` to check processing status
+4. **Handle failures**: Run `python scripts/retry_failed.py` for failed papers
+5. **Future enhancements**:
+   - Add parallel processing for faster downloads
+   - Implement citation extraction from markdown
+   - Add web interface for monitoring
+   - Support for incremental updates

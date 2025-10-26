@@ -1,0 +1,24 @@
+download:
+  timeout: 60
+  max_retries: 3
+  retry_delay: 5
+  user_agent: "OpenReview-Crawler/1.0"
+  rate_limit: 5  # requests per second
+
+storage:
+  base_dir: "data"
+  input_json: "iclr_2024_papers_reviews_accepted.json"
+
+conversion:
+  markitdown_options: {}
+  skip_existing: true
+
+processing:
+  batch_size: 10
+  parallel_workers: 4
+  resume_on_restart: true
+
+logging:
+  level: "INFO"
+  file: "logs/processing_{timestamp}.log"
+  console: true

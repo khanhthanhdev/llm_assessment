@@ -86,13 +86,14 @@ def is_accepted_paper(decision):
     return False
 
 
-def crawl_iclr_papers_and_reviews(year: int, accepted_only: bool = False):
+def crawl_iclr_papers_and_reviews(year: int, accepted_only: bool = False, limit: int = None):
     """
     Crawl papers and reviews from ICLR conference
     
     Args:
         year: Conference year (e.g., 2024, 2023, 2022)
         accepted_only: If True, only return accepted papers
+        limit: Maximum number of papers to crawl (None for all papers)
     """
     client, api_version = get_openreview_client()
     
@@ -286,10 +287,10 @@ def crawl_iclr_papers_and_reviews(year: int, accepted_only: bool = False):
         # Rate limiting
         time.sleep(0.3)
         
-        # Optional: Limit for testing (remove this for full crawl)
-        # if i >= 5:
-        #     print("\n⚠ Stopping at 5 papers for testing. Remove limit for full crawl.")
-        #     break
+        # Check if we've reached the limit
+        if limit and len(valid_papers) >= limit:
+            logger.info(f"\n✓ Reached limit of {limit} papers. Stopping crawl.")
+            break
     
     if invalid_papers:
         logger.warning(f"Skipped {len(invalid_papers)} papers due to validation errors or fetch issues.")
@@ -412,7 +413,8 @@ def save_data(data: List, year: int, accepted_only: bool = False):
 if __name__ == "__main__":
     # Choose the year you want to crawl
     YEAR = 2024  
-    ACCEPTED_ONLY = True  # Set to True to only crawl accepted papers
+    ACCEPTED_ONLY = False  # Set to True to only crawl accepted papers
+    LIMIT = 50  # Limit to first 50 papers
     
     print(f"{'='*60}")
     print(f"ICLR {YEAR} Paper & Review Crawler")
@@ -420,11 +422,13 @@ if __name__ == "__main__":
         print("Mode: ACCEPTED PAPERS ONLY")
     else:
         print("Mode: ALL PAPERS")
+    if LIMIT:
+        print(f"Limit: First {LIMIT} papers")
     # Log the start of crawling
     log_crawl_start("ICLR", YEAR)
 
     # Crawl the data
-    data = crawl_iclr_papers_and_reviews(YEAR, accepted_only=ACCEPTED_ONLY)
+    data = crawl_iclr_papers_and_reviews(YEAR, accepted_only=ACCEPTED_ONLY, limit=LIMIT)
     
     if not data:
         print("\nNo data collected. Try a different year.")
